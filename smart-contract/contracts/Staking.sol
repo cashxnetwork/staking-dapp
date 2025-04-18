@@ -29,7 +29,7 @@ contract Staking is Ownable, ReentrancyGuard {
     address public marketingWallet = 0xe5243d16e48c8b2921Bd5A335f1eB9b5467c1a65;
     address public winnerWallet = 0xe9346D3A804266fC0cf701084E2DD915ab9f2dFF;
     uint256 public bnbPrice = 600 * 10**18; // USD/BNB, 18 decimals (e.g., $600)
-    uint256 public constant REGISTRATION_FEE_USD = 25 * 10**18; // $25, 18 decimals
+    uint256 public constant REGISTRATION_FEE_USD = 25 * 10**18; // $25
     uint256 public constant REFERRER_SHARE_USD = 16 * 10**18; // $16
     uint256 public constant MARKETING_SHARE_USD = 8 * 10**18; // $8
     uint256 public constant WINNER_SHARE_USD = 1 * 10**18; // $1
@@ -52,7 +52,7 @@ contract Staking is Ownable, ReentrancyGuard {
     event WinnerPaid(address indexed winner, uint256 amount);
     event BnbPriceUpdated(uint256 oldPrice, uint256 newPrice);
 
-    constructor() Ownable(msg.sender) {
+    constructor() Ownable() {
         plans.push(Plan(25 ether, BASE_APR, TOTAL_WEEKS * WEEK));
         plans.push(Plan(50 ether, BASE_APR, TOTAL_WEEKS * WEEK));
         plans.push(Plan(100 ether, BASE_APR, TOTAL_WEEKS * WEEK));
@@ -67,28 +67,24 @@ contract Staking is Ownable, ReentrancyGuard {
         require(!registered[msg.sender], "Already registered");
         require(!blacklist[msg.sender], "Wallet is blacklisted");
         require(referrer != address(0) && referrer != msg.sender && !blacklist[referrer], "Invalid referrer");
-        uint256 feeInBnb = (REGISTRATION_FEE_USD * 10**18) / bnbPrice; // Convert $25 to BNB
+        uint256 feeInBnb = (REGISTRATION_FEE_USD * 10**18) / bnbPrice;
         require(msg.value == feeInBnb, "Incorrect registration fee");
 
         registered[msg.sender] = true;
 
-        uint256 referrerAmount = (REFERRER_SHARE_USD * 10**18) / bnbPrice; // $16
-        uint256 marketingAmount = (MARKETING_SHARE_USD * 10**18) / bnbPrice; // $8
-        uint256 winnerAmount = (WINNER_SHARE_USD * 10**18) / bnbPrice; // $1
+        uint256 referrerAmount = (REFERRER_SHARE_USD * 10**18) / bnbPrice;
+        uint256 marketingAmount = (MARKETING_SHARE_USD * 10**18) / bnbPrice;
+        uint256 winnerAmount = (WINNER_SHARE_USD * 10**18) / bnbPrice;
         uint256 currentWeek = (block.timestamp / WEEK);
 
-        // Distribute to referrer
         (bool success, ) = referrer.call{value: referrerAmount}("");
         require(success, "Referrer transfer failed");
 
-        // Distribute to marketing wallet
         (success, ) = marketingWallet.call{value: marketingAmount}("");
         require(success, "Marketing transfer failed");
 
-        // Add to winner pool
         winnerPool[currentWeek] += winnerAmount;
 
-        // Track referrer
         if (referralCounts[referrer] < MAX_REFERRALS) {
             referrals[msg.sender] = referrer;
             referralCounts[referrer]++;
@@ -118,11 +114,11 @@ contract Staking is Ownable, ReentrancyGuard {
 
     function calculatePayout(address user, uint256 stakeIndex) public view returns (uint256) {
         if (blacklist[user] || stakeIndex >= stakes[user].length) return 0;
-        Stake memory stake = stakes[user][stakeIndex];
-        if (!stake.active) return 0;
+        Stake memory userStake = stakes[user][stakeIndex];
+        if (!userStake.active) return 0;
         uint256 apr = getUserApr(user);
         uint256 weeklyReturn = apr / 12;
-        return (stake.amount * weeklyReturn) / 10000;
+        return (userStake.amount * weeklyReturn) / 10000;
     }
 
     function getPendingPayout(address user) public view returns (uint256) {
@@ -130,11 +126,11 @@ contract Staking is Ownable, ReentrancyGuard {
         uint256 totalPayout = 0;
 
         for (uint256 i = 0; i < stakes[user].length; i++) {
-            Stake memory stake = stakes[user][i];
-            if (stake.active && stake.lastClaimWeek < currentWeek) {
+            Stake memory userStake = stakes[user][i];
+            if (userStake.active && userStake.lastClaimWeek < currentWeek) {
                 totalPayout += calculatePayout(user, i);
-                if ((block.timestamp - stake.startTime) / WEEK >= TOTAL_WEEKS) {
-                    totalPayout += stake.amount;
+                if ((block.timestamp - userStake.startTime) / WEEK >= TOTAL_WEEKS) {
+                    totalPayout += userStake.amount;
                 }
             }
         }
@@ -149,17 +145,17 @@ contract Staking is Ownable, ReentrancyGuard {
 
         uint256 totalPayout = 0;
         for (uint256 i = 0; i < stakes[msg.sender].length; i++) {
-            Stake storage stake = stakes[msg.sender][i];
-            if (stake.active && stake.lastClaimWeek < currentWeek) {
+            Stake storage userStake = stakes[msg.sender][i];
+            if (userStake.active && userStake.lastClaimWeek < currentWeek) {
                 uint256 payout = calculatePayout(msg.sender, i);
                 if (payout > 0) {
                     totalPayout += payout;
-                    stake.lastClaimWeek = currentWeek;
+                    userStake.lastClaimWeek = currentWeek;
                 }
-                if ((block.timestamp - stake.startTime) / WEEK >= TOTAL_WEEKS) {
-                    totalPayout += stake.amount;
-                    stake.active = false;
-                    emit PrincipalReturned(msg.sender, stake.amount);
+                if ((block.timestamp - userStake.startTime) / WEEK >= TOTAL_WEEKS) {
+                    totalPayout += userStake.amount;
+                    userStake.active = false;
+                    emit PrincipalReturned(msg.sender, userStake.amount);
                 }
             }
         }
